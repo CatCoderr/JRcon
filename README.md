@@ -1,6 +1,27 @@
 # JRcon
 Example implementation of RCON protocol based on Netty
 
+## Add to your project
+
+Add jitpack repo
+```xml
+	<repositories>
+		<repository>
+		    <id>jitpack.io</id>
+		    <url>https://jitpack.io</url>
+		</repository>
+	</repositories>
+```
+
+Add JRcon to your project
+```xml
+	<dependency>
+	    <groupId>com.github.CatCoderr</groupId>
+	    <artifactId>JRcon</artifactId>
+	    <version>v1.0</version>
+	</dependency>
+```
+
 ## Usage
 
 Firstly, we need the following settings:
