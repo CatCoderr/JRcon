@@ -1,9 +1,11 @@
 package me.catcoder.jrcon;
 
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
+import io.netty.channel.epoll.Epoll;
+import io.netty.channel.epoll.EpollEventLoopGroup;
+import io.netty.channel.epoll.EpollSocketChannel;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 
@@ -19,7 +21,7 @@ import java.net.InetSocketAddress;
 public class JRcon {
 
     private JRcon( ) {
-
+        throw new IllegalStateException( "Don't initialize me!" );
     }
 
     public static Bootstrap newBootstrap( InetSocketAddress address,
@@ -28,7 +30,7 @@ public class JRcon {
                                           EventLoopGroup group,
                                           RconResponseHandler handler ) {
         return new Bootstrap()
-                .channel( NioSocketChannel.class )
+                .channel( getClientChannel() )
                 .group( group )
                 .attr( RconHandler.COMMAND_ATTR, command )
                 .attr( RconHandler.PASSWORD_ATTR, password )
@@ -44,6 +46,14 @@ public class JRcon {
                     }
                 } )
                 .remoteAddress( address );
+    }
+
+    public static EventLoopGroup newEventloops( int threads ) {
+        return Epoll.isAvailable() ? new EpollEventLoopGroup( threads ) : new NioEventLoopGroup( threads );
+    }
+
+    public static Class<? extends SocketChannel> getClientChannel( ) {
+        return Epoll.isAvailable() ? EpollSocketChannel.class : NioSocketChannel.class;
     }
 
 }
