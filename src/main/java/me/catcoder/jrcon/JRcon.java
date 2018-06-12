@@ -10,13 +10,14 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 
 import java.net.InetSocketAddress;
+import java.util.concurrent.CompletableFuture;
 
 /***
  * <p>
  * Example implementation of RCON protocol based on Netty.
  *
  * @author CatCoder
- * @version 1.0
+ * @version 2.0
  */
 public class JRcon {
 
@@ -24,28 +25,65 @@ public class JRcon {
         throw new IllegalStateException( "Don't initialize me!" );
     }
 
+    /**
+     * Define JRcon bootstrap.
+     *
+     * @param address - server address
+     * @param group   - event loops
+     * @return configured bootstrap
+     */
     public static Bootstrap newBootstrap( InetSocketAddress address,
-                                          String password,
-                                          String command,
-                                          EventLoopGroup group,
-                                          RconResponseHandler handler ) {
+                                          EventLoopGroup group ) {
         return new Bootstrap()
                 .channel( getClientChannel() )
                 .group( group )
-                .attr( RconHandler.COMMAND_ATTR, command )
-                .attr( RconHandler.PASSWORD_ATTR, password )
-                .attr( RconHandler.RESPONSE_HANDLER_ATTR, handler )
                 .handler( new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel( SocketChannel ch ) throws Exception {
                         ChannelPipeline pipeline = ch.pipeline();
 
-                        pipeline.addLast( "framer", new RconFramingHandler() );
-                        pipeline.addLast( "handler", new RconHandler() );
+                        pipeline.addLast( "rcon_framer", new RconFramingHandler() );
+                        pipeline.addLast( "rcon_handler", new RconHandler() );
 
                     }
                 } )
                 .remoteAddress( address );
+    }
+
+    /**
+     * Creates new JRcon session to interact with server.
+     *
+     * @param connectFuture - connect future (use {@link JRcon#newBootstrap(InetSocketAddress, EventLoopGroup)} method)
+     * @return new unauthenticated JRcon session.
+     */
+    public static JRconSession newSession( ChannelFuture connectFuture ) {
+        Channel channel = connectFuture.syncUninterruptibly().channel();
+
+        ChannelPipeline pipeline = channel.pipeline();
+
+        RconHandler handler = pipeline.get( RconHandler.class );
+
+        return new JRconSession() {
+            @Override
+            public CompletableFuture<String> executeCommand( String command ) {
+                return handler.executeCommand( command );
+            }
+
+            @Override
+            public boolean isAuthenticated( ) {
+                return handler.isAuthenticated();
+            }
+
+            @Override
+            public CompletableFuture<Boolean> authenticate( String password ) {
+                return handler.authenticate( password );
+            }
+
+            @Override
+            public ChannelFuture close( ) {
+                return channel.close();
+            }
+        };
     }
 
     public static EventLoopGroup newEventloops( int threads ) {

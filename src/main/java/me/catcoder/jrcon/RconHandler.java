@@ -1,37 +1,66 @@
 package me.catcoder.jrcon;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.util.AttributeKey;
 
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class RconHandler extends ChannelInboundHandlerAdapter {
-
-    static final AttributeKey<RconResponseHandler> RESPONSE_HANDLER_ATTR = AttributeKey.valueOf( "JRcon Response Handler" );
-    static final AttributeKey<String> PASSWORD_ATTR = AttributeKey.valueOf( "Password" );
-    static final AttributeKey<String> COMMAND_ATTR = AttributeKey.valueOf( "Command" );
 
     private static final byte FAILURE = -1;
     private static final byte TYPE_RESPONSE = 0;
     private static final byte TYPE_COMMAND = 2;
     private static final byte TYPE_LOGIN = 3;
 
-    private final int requestId = ThreadLocalRandom.current().nextInt( 0xff );
 
-    private RconState state = RconState.LOGIN;
     private StringBuffer buffer;
+    private boolean authenticated;
 
-    public RconState getState( ) {
-        return state;
-    }
+    private CompletableFuture<Boolean> authFuture;
+    private final Map<Integer, CompletableFuture<String>> commandResponses = new HashMap<>();
+
+    private final AtomicInteger requestId = new AtomicInteger( 1 );
+
+    private Channel channel;
 
     @Override
     public void channelActive( ChannelHandlerContext ctx ) throws Exception {
-        ctx.writeAndFlush( writeTo( TYPE_LOGIN, ctx.channel().attr( PASSWORD_ATTR ).get(), ctx.alloc().buffer().order( ByteOrder.LITTLE_ENDIAN ) ) );
+        this.channel = ctx.channel();
+    }
+
+    CompletableFuture<Boolean> authenticate( String password ) {
+        checkState( channel != null, "Channel is not active yet." );
+        checkState( !isAuthenticated(), "Session already authenticated." );
+
+        this.authFuture = new CompletableFuture<>();
+        channel.writeAndFlush( writeTo( TYPE_LOGIN, password, channel.alloc().buffer().order( ByteOrder.LITTLE_ENDIAN ) ) );
+        return authFuture;
+    }
+
+    CompletableFuture<String> executeCommand( String command ) {
+        checkState( channel != null, "Channel is not active yet." );
+        checkState( isAuthenticated(), "Session is not authenticated." );
+
+        CompletableFuture<String> future = new CompletableFuture<>();
+
+        commandResponses.put( requestId.incrementAndGet(), future );
+
+        channel.writeAndFlush( writeTo( TYPE_COMMAND, command, channel.alloc().buffer().order( ByteOrder.LITTLE_ENDIAN ) ) );
+
+        return future;
+    }
+
+    boolean isAuthenticated( ) {
+        return authenticated;
     }
 
     @Override
@@ -49,44 +78,31 @@ public class RconHandler extends ChannelInboundHandlerAdapter {
         }
         String payload = buffer == null ? readPayload( buf ) : buffer.toString();
 
-        RconResponseHandler handler = ctx.channel().attr( RESPONSE_HANDLER_ATTR ).get();
-
-        checkState( this.requestId == requestId, "Request id mismatch (excepted %s), got %s", this.requestId, requestId );
-
         if ( type == TYPE_COMMAND ) {
-            checkExceptedState( RconState.LOGIN );
 
-            if ( requestId == FAILURE ) {
-                handler.authenticationFailed();
-                state = RconState.FINISHED;
-                return;
-            }
-            writeTo( TYPE_COMMAND, ctx.channel().attr( COMMAND_ATTR ).get(), buf );
-            state = RconState.COMMAND;
+            authenticated = requestId != FAILURE;
 
         } else if ( type == TYPE_RESPONSE && !buf.isReadable() ) {
 
-            checkExceptedState( RconState.COMMAND );
+            CompletableFuture<String> responseHandler = commandResponses.remove( requestId );
 
-            state = RconState.FINISHED;
+            if ( responseHandler != null ) {
+                responseHandler.complete( payload );
+            }
+
             buffer = null;
-
-            handler.handleResponse( payload );
         }
 
-        if ( buf.isReadable() ) {
-            ctx.writeAndFlush( buf );
+        if ( authFuture != null && type == TYPE_COMMAND ) {
+            authFuture.complete( authenticated );
+            authFuture = null;
         }
-
-        if ( state == RconState.FINISHED ) {
+        if ( !authenticated ) {
             ctx.close();
         }
+
     }
 
-
-    private void checkExceptedState( RconState state ) {
-        checkState( this.state == state, "Excepted %s", state );
-    }
 
     private void checkState( boolean condition, String messageFormat, Object... objects ) {
         if ( !condition ) {
@@ -96,7 +112,7 @@ public class RconHandler extends ChannelInboundHandlerAdapter {
     }
 
     private ByteBuf writeTo( int type, String payload, ByteBuf buf ) {
-        buf.writeInt( requestId );
+        buf.writeInt( requestId.get() );
         buf.writeInt( type );
         buf.writeBytes( payload.getBytes( StandardCharsets.UTF_8 ) );
         buf.writeByte( 0 );

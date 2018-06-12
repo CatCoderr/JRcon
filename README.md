@@ -18,7 +18,7 @@ Add JRcon to your project
 	<dependency>
 	    <groupId>com.github.CatCoderr</groupId>
 	    <artifactId>JRcon</artifactId>
-	    <version>v1.0</version>
+	    <version>LATEST_VERSION</version>
 	</dependency>
 ```
 
@@ -31,27 +31,23 @@ Firstly, we need the following settings:
         String command = "broadcast Hello from Rcon!";
         EventLoopGroup eventLoops = JRcon.newEventloops( numberOfThreads );
 
-        RconResponseHandler responseHandler = new RconResponseHandler() {
-            @Override
-            public void handleResponse( String payload ) {
-                //handle command response
-            }
-
-            @Override
-            public void authenticationFailed( ) {
-                //server rejected our password
-            }
-        };
 ```
 Finally, we can create a new bootstrap from settings below:
 ```java
-        Bootstrap bootstrap = JRcon.newBootstrap( serverAddress, password, command, eventLoops, responseHandler );
+        Bootstrap bootstrap = JRcon.newBootstrap( serverAddress, eventLoops );
 
-        //Connect and listen I/O transport errors
         bootstrap.connect().addListener( ( ChannelFutureListener ) future -> {
-            if ( !future.isSuccess() ) {
-                //handle error
-                future.cause().printStackTrace();
+            if ( future.isSuccess() ) {
+                //Connection is sucessfully, then create a new session
+                JRconSession session = JRcon.newSession( future );
+
+                session.authenticate( password ).get(); //Sync authentication
+
+                System.out.println( "Authenticated: " + session.isAuthenticated() );
+
+                session.executeCommand( command ).thenAccept( System.out::println ); //Executing commands
+            } else {
+                //Handle I/O transport errors.
             }
         } );
 ```
