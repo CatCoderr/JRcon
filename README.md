@@ -18,7 +18,7 @@ Add JRcon to your project
 	<dependency>
 	    <groupId>com.github.CatCoderr</groupId>
 	    <artifactId>JRcon</artifactId>
-	    <version>LATEST_VERSION</version>
+	    <version>2.0</version>
 	</dependency>
 ```
 
